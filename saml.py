@@ -1,12 +1,10 @@
-from __future__ import print_function
-
-import cookielib
+from http import cookiejar as cookielib
 import getpass
-import HTMLParser
+from html.parser import HTMLParser
 import re
 import sys
-import urllib
-import urllib2
+import urllib.request, urllib.parse, urllib.error
+import urllib.request, urllib.error, urllib.parse
 
 
 class Client:
@@ -21,10 +19,16 @@ class Client:
   def __init__(self, username=None, password=None):
     # Create (global) cookie jar. Works across multiple requests
     cj = cookielib.CookieJar()
-    self.opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
-    self.username = username or getpass.getuser()
+    self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    self.username = username
     self.password = password
 
+  def _tryVar(self, var):
+    try:
+      val = var
+    except NameError:
+      return None
+    return val
 
   def get(self, url):
     # 1. Request target resource
@@ -38,18 +42,18 @@ class Client:
     # Prepare authentication payload. Implementation specific!
     self.ensure_credentials()
     auth_url  = res.geturl()
-    auth_data = urllib.urlencode({
+    auth_data = urllib.parse.urlencode({
       'j_username': self.username,
       'j_password': self.password
     })
 
     # 3. Request SSO Service
     # 4. Respond with XHTML form
-    res = self.opener.open(auth_url, auth_data)
+    res = self.opener.open(auth_url, auth_data.encode('utf-8'))
 
     # Authentication failed? (staying on same page)
     if res.geturl() == auth_url:
-      raise urllib2.HTTPError(auth_url, 401, 'Authentication failed', res.info(), res)
+      raise urllib.error.HTTPError(auth_url, 401, 'Authentication failed', res.info(), res)
 
     # Prepare assertion payload. Implementation specific!
     content = res.read()
@@ -64,7 +68,7 @@ class Client:
     assertion_url       = html_parser.unescape(assertion_url_match.group(1))
     relay_state         = html_parser.unescape(relay_state_match.group(1))
     saml_response       = saml_response_match.group(1)
-    saml_data = urllib.urlencode({
+    saml_data = urllib.parse.urlencode({
       'RelayState': relay_state,
       'SAMLResponse': saml_response
     })
@@ -84,20 +88,9 @@ class Client:
 
 
   def ensure_credentials(self):
-    # Load lazily in case it's not needed
-    try:
-      import keyring
-    except ImportError as e:
-      print('Dependency missing. Try `pip install keyring`', file=sys.stderr)
-      raise e
-
-    if self.username == None and sys.stdin.isatty() and sys.stdout.isatty():
+    if self._tryVar(self.username) is None and sys.stdin.isatty() and sys.stdout.isatty():
       print('Authentication required. Credentials are stored in OS keychain/keyring')
-      self.username = raw_input('Username: ')
+      self.username = input('Username: ')
 
-    if self.password == None:
-      keyring_service = 'rieplay'
-      self.password = keyring.get_password(keyring_service, self.username)
-      if self.password == None and sys.stdin.isatty() and sys.stdout.isatty():
-        self.password = getpass.getpass('Password: ')
-        keyring.set_password(keyring_service, self.username, self.password)
+    if self.password == None and sys.stdin.isatty() and sys.stdout.isatty():
+      self.password = getpass.getpass('Password: ')
